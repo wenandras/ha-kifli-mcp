@@ -183,7 +183,7 @@ class AuthManager:
     async def ensure_logged_in(self) -> None:
         """Egy hitelesített kérés az MCP végpontra: ha nincs érvényes token, az SDK
         lefuttatja a teljes OAuth folyamatot (felfedezés, regisztráció, redirect,
-        kód bevárása, token csere). Sikeres végén tokenunk van."""
+        kód bevárása, token csere). Sikeres végén tokenünk van."""
         self.error = None
         if not self.storage.has_tokens():
             self.status = "needs_login"
@@ -253,11 +253,14 @@ PAGE = """<!doctype html><html lang="hu"><head><meta charset="utf-8">
  table{{width:100%;border-collapse:collapse}} td{{padding:.35rem .3rem;border-top:1px solid #eee;vertical-align:top}}
  td.n{{white-space:nowrap}} .new{{background:#fff3e0;color:#e65100;border-radius:4px;padding:0 .3rem;font-size:.8rem}}
  .gone{{color:#999;text-decoration:line-through}}
+ .toast{{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:#2e7d32;color:#fff;padding:.7rem 1.2rem;border-radius:10px;box-shadow:0 2px 8px #0004;max-width:90%;animation:fade 6s forwards}}
+ .toast.err{{background:#c62828}} @keyframes fade{{0%,80%{{opacity:1}}100%{{opacity:0;visibility:hidden}}}}
 </style></head><body>
 <h1>🛒 Kifli / Rohlik MCP</h1>
 <div class="card"><b>Állapot / Status:</b> {status_html}{error_html}</div>
 {body}
 {tools}
+{toast}
 <p><small>Végpont / endpoint: <code>{mcp_url}</code> · SSE a Home Assistantnak: <code>http://&lt;ha-ip&gt;:{port}/sse</code></small></p>
 </body></html>"""
 
@@ -342,6 +345,7 @@ def build_app(auth: AuthManager, port: int, on_login_ok, settings=None, on_tools
             body = LOGIN_BODY.format(auth_button=btn)
         return HTMLResponse(PAGE.format(status_html=status_html, error_html=error_html, body=body,
                                         tools=render_tools(settings),
+                                        toast=(f'<div class="toast {msg_class}">{html.escape(message)}</div>' if message else ""),
                                         mcp_url=html.escape(auth.mcp_url), port=port))
 
     async def index(_: Request):
@@ -352,7 +356,7 @@ def build_app(auth: AuthManager, port: int, on_login_ok, settings=None, on_tools
         err = auth.submit_callback_url(str(form.get("url", "")))
         if err:
             return render(err)
-        # megvárjuk a token czerét (pár másodperc), hogy a válasz már a végeredményt mutassa
+        # megvárjuk a token cserét (pár másodperc), hogy a válasz már a végeredményt mutassa
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(auth.logged_in.wait(), timeout=25)
         if auth.status == "ok":
@@ -373,8 +377,16 @@ def build_app(auth: AuthManager, port: int, on_login_ok, settings=None, on_tools
     async def tools(request: Request):
         if settings is None:
             return RedirectResponse(url=".", status_code=303)
-        form = await request.form()
-        settings.set_enabled({str(v) for v in form.getlist("tool")})
+        if request.headers.get("content-type", "").startswith("application/json"):
+            # gépi beállítás (pl. Supervisor proxy): {"enabled": ["tool_a", ...]}
+            data = await request.json()
+            names = data.get("enabled") if isinstance(data, dict) else None
+            if not isinstance(names, list):
+                return render('JSON esetén {"enabled": [...]} kell. / Expected {"enabled": [...]}.')
+            settings.set_enabled({str(v) for v in names})
+        else:
+            form = await request.form()
+            settings.set_enabled({str(v) for v in form.getlist("tool")})
         note = await on_tools_saved() if on_tools_saved else ""
         return render(f"Mentve. HA MCP integráció újratöltve: {note}", "ok")
 
