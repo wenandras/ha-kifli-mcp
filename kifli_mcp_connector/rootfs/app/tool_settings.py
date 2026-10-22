@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
+from tool_descriptions_hu import describe
 
 log = logging.getLogger("kifli.tools")
 
@@ -49,8 +50,11 @@ class ToolSettings:
     def __init__(self, path: Path, new_tools_enabled: bool) -> None:
         self.path = path
         self.new_tools_enabled = new_tools_enabled
+        # megjelenítési nyelv: a 'country' opció (hu → magyar leírások)
+        self.lang = os.environ.get("KIFLI_LANG", "en")
         self.tools: dict[str, dict] = {}
         self.removed: list[str] = []
+        self.rev = 0  # minden mentéskor nő – az elavult oldalról jövő mentést így ismerjük fel
         self.initialized = False
         self._load()
 
@@ -62,13 +66,15 @@ class ToolSettings:
             return
         self.tools = {k: v for k, v in (data.get("tools") or {}).items() if isinstance(v, dict)}
         self.removed = [str(x) for x in data.get("removed") or []]
+        self.rev = int(data.get("rev") or 0)
         self.initialized = True
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.rev += 1
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(
-            json.dumps({"tools": self.tools, "removed": self.removed}, ensure_ascii=False, indent=1),
+            json.dumps({"tools": self.tools, "removed": self.removed, "rev": self.rev}, ensure_ascii=False, indent=1),
             encoding="utf-8",
         )
         with contextlib.suppress(OSError):
@@ -83,8 +89,12 @@ class ToolSettings:
             return self.new_tools_enabled
         return bool(entry.get("enabled"))
 
+    def display_description(self, name: str) -> str:
+        return describe(name, str(self.tools.get(name, {}).get("description", "")), self.lang)
+
     def listing(self) -> list[tuple[str, dict]]:
-        return sorted(self.tools.items())
+        """Rendezett lista a felülethez, a leírás a megjelenítési nyelven."""
+        return [(n, {**e, "description": self.display_description(n)}) for n, e in sorted(self.tools.items())]
 
     # --- módosítás -------------------------------------------------------------
     def sync(self, upstream: dict[str, str]) -> tuple[list[str], list[str]]:
@@ -143,7 +153,7 @@ async def notify_ha(new: list[str], removed: list[str], settings: ToolSettings) 
         state = "bekapcsolva" if settings.new_tools_enabled else "KIKAPCSOLVA"
         lines.append(f"**Új Kifli-funkció ({state}):**")
         for n in new:
-            lines.append(f"- `{n}` – {_short(settings.tools.get(n, {}).get('description', ''))}")
+            lines.append(f"- `{n}` – {_short(settings.display_description(n))}")
     if removed:
         lines.append("**Megszűnt Kifli-funkció:**")
         lines.extend(f"- `{n}`" for n in removed)
@@ -160,7 +170,7 @@ async def notify_ha(new: list[str], removed: list[str], settings: ToolSettings) 
             for n in new:
                 await c.post(f"{base}/events/{EVENT_NEW}", headers=h, json={
                     "tool": n,
-                    "description": _short(settings.tools.get(n, {}).get("description", ""), 500),
+                    "description": _short(settings.display_description(n), 500),
                     "enabled": settings.is_enabled(n),
                 })
             for n in removed:

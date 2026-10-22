@@ -42,6 +42,8 @@ fi
 export KIFLI_MCP_URL="${URL}"
 export KIFLI_PORT="${PORT}"
 export KIFLI_INGRESS_PORT="42784"
+# a felület / értesítések nyelve (hu → magyar eszközleírások)
+export KIFLI_LANG="${COUNTRY}"
 if bashio::config.true 'new_tools_enabled'; then
   export KIFLI_NEW_TOOLS_ENABLED="true"
 else

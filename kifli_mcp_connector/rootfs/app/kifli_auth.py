@@ -323,6 +323,7 @@ akkor sem lehet meghívni, ha valaki közvetlenül a portra csatlakozik. Az újo
 {'bekapcsolva' if settings.new_tools_enabled else '<b>kikapcsolva</b>'} érkeznek, és értesítés jön róluk.
 <br>Only checked tools are exposed to Home Assistant; unchecked ones are also refused on direct calls.</small></p>
 <form method="post" action="tools">
+<input type="hidden" name="rev" value="{settings.rev}">
 <p><button type="button" class="sec" onclick="document.querySelectorAll('input[name=tool]:not(:disabled)').forEach(c=>c.checked=true)">Mind be</button>
 <button type="button" class="sec" onclick="document.querySelectorAll('input[name=tool]').forEach(c=>c.checked=false)">Mind ki</button></p>
 <table>{''.join(rows)}</table>
@@ -386,6 +387,12 @@ def build_app(auth: AuthManager, port: int, on_login_ok, settings=None, on_tools
             settings.set_enabled({str(v) for v in names})
         else:
             form = await request.form()
+            # elavult oldalról (pl. másik fülön közben módosítottak) ne írjuk vissza a régi állapotot
+            if str(form.get("rev", "")) != str(settings.rev):
+                return render(
+                    "Az oldal elavult, közben módosult a beállítás – frissítsd az oldalt (F5), és mentsd újra. / "
+                    "This page is out of date – reload it and save again."
+                )
             settings.set_enabled({str(v) for v in form.getlist("tool")})
         note = await on_tools_saved() if on_tools_saved else ""
         return render(f"Mentve. HA MCP integráció újratöltve: {note}", "ok")
